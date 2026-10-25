@@ -1,25 +1,199 @@
-import {test,before,after} from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import {randomUUID} from 'node:crypto';
-import type {Server} from 'node:http';
-import {createApp} from '../server/app.js';
-import {createDeps,closeDeps,type Deps} from '../server/deps.js';
+import { randomUUID } from 'node:crypto';
+import type { Server } from 'node:http';
+import { createApp } from '../server/app.js';
+import { createDeps, closeDeps, type Deps } from '../server/deps.js';
 
-if(!process.env.DATABASE_URL||!['127.0.0.1','localhost','postgres'].includes(new URL(process.env.DATABASE_URL).hostname))throw new Error('Tests require an isolated local PostgreSQL database.');
-let deps:Deps,server:Server,base:string,alice='',bob='',aliceId='',bobId='',assetId='';
-const email=`media-${randomUUID()}@example.test`,password='Local-test-password-43';
-async function start(){await new Promise<void>(resolve=>{server=createApp(deps).listen(0,'127.0.0.1',()=>resolve());});const a=server.address();assert.ok(a&&typeof a==='object');base=`http://127.0.0.1:${a.port}`;}
-async function request(path:string,method='GET',body?:unknown,cookie='',origin?:string){const multipart=body instanceof FormData;const r=await fetch(base+path,{method,headers:{...(!multipart&&body?{'Content-Type':'application/json'}:{}),...(cookie?{Cookie:cookie}:{}),...(origin?{Origin:origin}:{})},body:multipart?body:body?JSON.stringify(body):undefined});return {status:r.status,body:r.status===204?null:r.headers.get('content-type')?.includes('application/json')?await r.json():await r.text(),headers:r.headers,cookie:r.headers.get('set-cookie')?.split(';')[0]||''};}
-function form(type='text',file?:Blob){const f=new FormData();f.set('title','Private latency review');f.set('kind',type);f.set('description','Review backend API caching and performance.');f.set('tags','performance, API, API');if(file)f.set('file',file,'review.txt');return f;}
-before(async()=>{deps=createDeps();await start();});
-after(async()=>{await new Promise<void>(resolve=>server.close(()=>resolve()));for(const id of [aliceId,bobId])if(id)await deps.pool.query('DELETE FROM media_users WHERE id=$1',[id]);await closeDeps(deps);});
-test('anonymous visitors can search samples and cannot upload',async()=>{const r=await request('/api/media/search?q=secure+login');assert.equal(r.status,200);assert.equal(r.body.signedIn,false);assert.equal(r.body.assets[0].title,'Access control architecture');assert.equal((await request('/api/media','POST',form())).status,401);});
-test('registration stores a hash and creates a private HttpOnly session',async()=>{const r=await request('/api/auth/register','POST',{name:'Alice QA',email,password});assert.equal(r.status,201);alice=r.cookie;aliceId=r.body.id;assert.match(r.headers.get('set-cookie')!,/HttpOnly/);assert.match(r.headers.get('set-cookie')!,/SameSite=Lax/);const hash=(await deps.pool.query('SELECT password_hash FROM media_users WHERE id=$1',[aliceId])).rows[0].password_hash;assert.notEqual(hash,password);const b=await request('/api/auth/register','POST',{name:'Bob QA',email:`bob-${email}`,password});assert.equal(b.status,201);bob=b.cookie;bobId=b.body.id;});
-test('plain-text files persist, deduplicate tags and become searchable',async()=>{const r=await request('/api/media','POST',form('text',new Blob(['Redis cache reduces backend query latency.'],{type:'text/plain'})),alice);assert.equal(r.status,201);assetId=r.body.id;assert.equal(r.body.content,'Redis cache reduces backend query latency.');assert.deepEqual(r.body.tags,['performance','API']);assert.equal((await request(`/api/media/${assetId}/file`,'GET',undefined,alice)).body,r.body.content);const found=await request('/api/media/search?q=faster+APIs&kind=text','GET',undefined,alice);assert.ok(found.body.assets.some((a:{id:string})=>a.id===assetId));});
-test('private metadata and files are isolated between users',async()=>{assert.ok(!(await request('/api/media/search','GET',undefined,bob)).body.assets.some((a:{id:string})=>a.id===assetId));assert.equal((await request(`/api/media/${assetId}/file`,'GET',undefined,bob)).status,404);assert.equal((await request(`/api/media/${assetId}`,'DELETE',undefined,bob)).status,404);assert.equal((await request(`/api/media/${assetId}/file`)).status,401);});
-test('file downloads support byte ranges and reject invalid ranges',async()=>{const r=await fetch(`${base}/api/media/${assetId}/file`,{headers:{Cookie:alice,Range:'bytes=0-4'}});assert.equal(r.status,206);assert.equal(await r.text(),'Redis');assert.match(r.headers.get('content-range')!,/^bytes 0-4\//);assert.equal((await fetch(`${base}/api/media/${assetId}/file`,{headers:{Cookie:alice,Range:'bytes=9999-'}})).status,416);});
-test('format filters and request validation are enforced',async()=>{const r=await request('/api/media/search?kind=audio');assert.ok(r.body.assets.every((a:{kind:string})=>a.kind==='audio'));assert.equal((await request('/api/media/search?kind=video')).status,400);assert.equal((await request('/api/media','POST',form('image',new Blob(['not an image'],{type:'text/plain'})),alice)).status,400);assert.equal((await request('/api/media','POST',form('text',new Blob([new Uint8Array(2097153)],{type:'text/plain'})),alice)).status,413);});
-test('cross-origin mutations are rejected',async()=>{assert.equal((await request('/api/media','POST',form(),alice,'https://untrusted.example')).status,403);});
-test('a fresh API instance preserves sessions and uploaded files',async()=>{await new Promise<void>(resolve=>server.close(()=>resolve()));await closeDeps(deps);deps=createDeps();await start();assert.equal((await request(`/api/media/${assetId}/file`,'GET',undefined,alice)).status,200);});
-test('logout invalidates the session and login creates a new session',async()=>{assert.equal((await request('/api/auth/logout','POST',undefined,alice)).status,204);assert.equal((await request(`/api/media/${assetId}/file`,'GET',undefined,alice)).status,401);assert.equal((await request('/api/auth/login','POST',{email,password:'wrong-password'})).status,401);const login=await request('/api/auth/login','POST',{email,password});assert.equal(login.status,200);assert.notEqual(login.cookie,alice);alice=login.cookie;});
-test('deletion removes metadata and stored bytes',async()=>{assert.equal((await request(`/api/media/${assetId}`,'DELETE',undefined,alice)).status,204);assert.equal((await request(`/api/media/${assetId}/file`,'GET',undefined,alice)).status,404);});
+if (
+  !process.env.DATABASE_URL ||
+  !['127.0.0.1', 'localhost', 'postgres'].includes(new URL(process.env.DATABASE_URL).hostname)
+)
+  throw new Error('Tests require an isolated local PostgreSQL database.');
+let deps: Deps,
+  server: Server,
+  base: string,
+  alice = '',
+  bob = '',
+  aliceId = '',
+  bobId = '',
+  assetId = '';
+const email = `media-${randomUUID()}@example.test`,
+  password = 'Local-test-password-43';
+async function start() {
+  await new Promise<void>((resolve) => {
+    server = createApp(deps).listen(0, '127.0.0.1', () => resolve());
+  });
+  const a = server.address();
+  assert.ok(a && typeof a === 'object');
+  base = `http://127.0.0.1:${a.port}`;
+}
+async function request(path: string, method = 'GET', body?: unknown, cookie = '', origin?: string) {
+  const multipart = body instanceof FormData;
+  const r = await fetch(base + path, {
+    method,
+    headers: {
+      ...(!multipart && body ? { 'Content-Type': 'application/json' } : {}),
+      ...(cookie ? { Cookie: cookie } : {}),
+      ...(origin ? { Origin: origin } : {}),
+    },
+    body: multipart ? body : body ? JSON.stringify(body) : undefined,
+  });
+  return {
+    status: r.status,
+    body:
+      r.status === 204
+        ? null
+        : r.headers.get('content-type')?.includes('application/json')
+          ? await r.json()
+          : await r.text(),
+    headers: r.headers,
+    cookie: r.headers.get('set-cookie')?.split(';')[0] || '',
+  };
+}
+function form(type = 'text', file?: Blob) {
+  const f = new FormData();
+  f.set('title', 'Private latency review');
+  f.set('kind', type);
+  f.set('description', 'Review backend API caching and performance.');
+  f.set('tags', 'performance, API, API');
+  if (file) f.set('file', file, 'review.txt');
+  return f;
+}
+before(async () => {
+  deps = createDeps();
+  await start();
+});
+after(async () => {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  for (const id of [aliceId, bobId])
+    if (id) await deps.pool.query('DELETE FROM media_users WHERE id=$1', [id]);
+  await closeDeps(deps);
+});
+test('anonymous visitors can search samples and cannot upload', async () => {
+  const r = await request('/api/media/search?q=secure+login');
+  assert.equal(r.status, 200);
+  assert.equal(r.body.signedIn, false);
+  assert.equal(r.body.assets[0].title, 'Access control architecture');
+  assert.equal((await request('/api/media', 'POST', form())).status, 401);
+});
+test('registration stores a hash and creates a private HttpOnly session', async () => {
+  const r = await request('/api/auth/register', 'POST', { name: 'Alice QA', email, password });
+  assert.equal(r.status, 201);
+  alice = r.cookie;
+  aliceId = r.body.id;
+  assert.match(r.headers.get('set-cookie')!, /HttpOnly/);
+  assert.match(r.headers.get('set-cookie')!, /SameSite=Lax/);
+  const hash = (
+    await deps.pool.query('SELECT password_hash FROM media_users WHERE id=$1', [aliceId])
+  ).rows[0].password_hash;
+  assert.notEqual(hash, password);
+  const b = await request('/api/auth/register', 'POST', {
+    name: 'Bob QA',
+    email: `bob-${email}`,
+    password,
+  });
+  assert.equal(b.status, 201);
+  bob = b.cookie;
+  bobId = b.body.id;
+});
+test('plain-text files persist, deduplicate tags and become searchable', async () => {
+  const r = await request(
+    '/api/media',
+    'POST',
+    form('text', new Blob(['Redis cache reduces backend query latency.'], { type: 'text/plain' })),
+    alice,
+  );
+  assert.equal(r.status, 201);
+  assetId = r.body.id;
+  assert.equal(r.body.content, 'Redis cache reduces backend query latency.');
+  assert.deepEqual(r.body.tags, ['performance', 'API']);
+  assert.equal(
+    (await request(`/api/media/${assetId}/file`, 'GET', undefined, alice)).body,
+    r.body.content,
+  );
+  const found = await request('/api/media/search?q=faster+APIs&kind=text', 'GET', undefined, alice);
+  assert.ok(found.body.assets.some((a: { id: string }) => a.id === assetId));
+});
+test('private metadata and files are isolated between users', async () => {
+  assert.ok(
+    !(await request('/api/media/search', 'GET', undefined, bob)).body.assets.some(
+      (a: { id: string }) => a.id === assetId,
+    ),
+  );
+  assert.equal((await request(`/api/media/${assetId}/file`, 'GET', undefined, bob)).status, 404);
+  assert.equal((await request(`/api/media/${assetId}`, 'DELETE', undefined, bob)).status, 404);
+  assert.equal((await request(`/api/media/${assetId}/file`)).status, 401);
+});
+test('file downloads support byte ranges and reject invalid ranges', async () => {
+  const r = await fetch(`${base}/api/media/${assetId}/file`, {
+    headers: { Cookie: alice, Range: 'bytes=0-4' },
+  });
+  assert.equal(r.status, 206);
+  assert.equal(await r.text(), 'Redis');
+  assert.match(r.headers.get('content-range')!, /^bytes 0-4\//);
+  assert.equal(
+    (
+      await fetch(`${base}/api/media/${assetId}/file`, {
+        headers: { Cookie: alice, Range: 'bytes=9999-' },
+      })
+    ).status,
+    416,
+  );
+});
+test('format filters and request validation are enforced', async () => {
+  const r = await request('/api/media/search?kind=audio');
+  assert.ok(r.body.assets.every((a: { kind: string }) => a.kind === 'audio'));
+  assert.equal((await request('/api/media/search?kind=video')).status, 400);
+  assert.equal(
+    (
+      await request(
+        '/api/media',
+        'POST',
+        form('image', new Blob(['not an image'], { type: 'text/plain' })),
+        alice,
+      )
+    ).status,
+    400,
+  );
+  assert.equal(
+    (
+      await request(
+        '/api/media',
+        'POST',
+        form('text', new Blob([new Uint8Array(2097153)], { type: 'text/plain' })),
+        alice,
+      )
+    ).status,
+    413,
+  );
+});
+test('cross-origin mutations are rejected', async () => {
+  assert.equal(
+    (await request('/api/media', 'POST', form(), alice, 'https://untrusted.example')).status,
+    403,
+  );
+});
+test('a fresh API instance preserves sessions and uploaded files', async () => {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await closeDeps(deps);
+  deps = createDeps();
+  await start();
+  assert.equal((await request(`/api/media/${assetId}/file`, 'GET', undefined, alice)).status, 200);
+});
+test('logout invalidates the session and login creates a new session', async () => {
+  assert.equal((await request('/api/auth/logout', 'POST', undefined, alice)).status, 204);
+  assert.equal((await request(`/api/media/${assetId}/file`, 'GET', undefined, alice)).status, 401);
+  assert.equal(
+    (await request('/api/auth/login', 'POST', { email, password: 'wrong-password' })).status,
+    401,
+  );
+  const login = await request('/api/auth/login', 'POST', { email, password });
+  assert.equal(login.status, 200);
+  assert.notEqual(login.cookie, alice);
+  alice = login.cookie;
+});
+test('deletion removes metadata and stored bytes', async () => {
+  assert.equal((await request(`/api/media/${assetId}`, 'DELETE', undefined, alice)).status, 204);
+  assert.equal((await request(`/api/media/${assetId}/file`, 'GET', undefined, alice)).status, 404);
+});

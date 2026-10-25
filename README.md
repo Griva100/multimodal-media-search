@@ -1,5 +1,6 @@
 # Multimodal Media Search
 
+[![Application checks](https://github.com/Griva100/multimodal-media-search/actions/workflows/checks.yml/badge.svg)](https://github.com/Griva100/multimodal-media-search/actions/workflows/checks.yml)
 A full stack media library built with React, TypeScript, Node.js, Express and PostgreSQL. Search captions, audio transcripts and text documents in one interface, then filter results by format. Visitors can explore sample records without an account; registered users can upload and manage their own private files.
 
 ## Features

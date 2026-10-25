@@ -6,10 +6,10 @@ services:
       POSTGRES_USER: media
       POSTGRES_PASSWORD: media_dev_only
       POSTGRES_DB: media
-    ports: ["127.0.0.1:5438:5432"]
-    volumes: ["media_pg:/var/lib/postgresql"]
+    ports: ['127.0.0.1:5438:5432']
+    volumes: ['media_pg:/var/lib/postgresql']
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U media -d media"]
+      test: ['CMD-SHELL', 'pg_isready -U media -d media']
       interval: 2s
       timeout: 2s
       retries: 20
@@ -20,9 +20,21 @@ services:
       DATABASE_URL: postgres://media:media_dev_only@postgres:5432/media
       HOST: 0.0.0.0
       PORT: 4189
-    ports: ["127.0.0.1:4189:4189"]
+    ports: ['127.0.0.1:4189:4189']
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4189/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
     depends_on:
-      postgres: {condition: service_healthy}
-    command: ["sh", "-c", "npm run db:migrate && npm start"]
+      postgres: { condition: service_healthy }
+    command: ['sh', '-c', 'npm run db:migrate && npm start']
 volumes:
   media_pg:
