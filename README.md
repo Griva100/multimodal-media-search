@@ -2,6 +2,7 @@
 
 [![Application checks](https://github.com/Griva100/multimodal-media-search/actions/workflows/checks.yml/badge.svg)](https://github.com/Griva100/multimodal-media-search/actions/workflows/checks.yml)
 A full stack media library built with React, TypeScript, Node.js, Express and PostgreSQL. Search captions, audio transcripts and text documents in one interface, then filter results by format. Visitors can explore sample records without an account; registered users can upload and manage their own private files.
+**Live application:** [https://griva-media-search.vercel.app](https://griva-media-search.vercel.app)
 
 ## Features
 
@@ -49,6 +50,8 @@ Integration tests use an isolated local PostgreSQL database, create disposable a
 
 ## Deploy to Vercel
 
+The live application uses Vercel and persistent Prisma PostgreSQL storage. Public search, secure registration, private uploads, downloads, byte ranges and user isolation were verified on 26 October 2026.
+
 1. Connect this repository to Vercel with the Vite framework preset. The included `vercel.json` routes API calls to `api/index.ts` and serves the frontend from `dist/`.
 2. Set `DATABASE_URL` to a hosted PostgreSQL connection string in Vercel environment variables. Never commit credentials.
 3. Vercel builds run the idempotent schema migration before compiling the app. Tables use a `media_` prefix, so they can coexist with Delivery Workspace in the same database. Local migrations remain available through `npm run db:migrate`.
@@ -68,4 +71,4 @@ React / TypeScript
    └── private metadata, vectors and file bytes
 ```
 
-This project was developed with AI assistance for Griva Shah. It is independent project work; no client adoption or production scale is claimed. Password reset, email verification, shared libraries, background transcription and learned model embeddings are outside the current implementation.
+Developed for Griva Shah with AI assistance. Password reset, email verification, shared libraries, background transcription and learned model embeddings are outside the current implementation.
