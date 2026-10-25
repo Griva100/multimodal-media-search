@@ -48,6 +48,12 @@ npm run build
 
 Integration tests use an isolated local PostgreSQL database, create disposable accounts, and clean up their own records. They cover public samples, password hashing, private uploads, ownership isolation, byte ranges, file limits, filters, persistence across API instances, sign-out, sign-in and deletion. Five search tests cover query ranking, aliases and vector edge cases.
 
+## Automatic production deployments
+
+The repository is connected to its Vercel project. Every push to `main` triggers a production build. Vercel runs `npm run vercel-build` to apply the idempotent schema migration, check TypeScript and build the frontend, then updates the live application after a successful build.
+
+GitHub Actions also runs the 15 automated tests and the build on pushes and pull requests. The production `DATABASE_URL` stays in Vercel's sensitive environment variables. Database-backed deployments from other branches need an isolated `DATABASE_URL` in Vercel's Preview environment.
+
 ## Deploy to Vercel
 
 The live application uses Vercel and persistent Prisma PostgreSQL storage. Public search, secure registration, private uploads, downloads, byte ranges and user isolation were verified on 26 October 2026.
