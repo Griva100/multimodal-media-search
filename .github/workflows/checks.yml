@@ -1,0 +1,28 @@
+name: Application checks
+on: [push, pull_request]
+jobs:
+  application:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: media
+          POSTGRES_PASSWORD: media_dev_only
+          POSTGRES_DB: media
+        ports: ['5438:5432']
+        options: >-
+          --health-cmd "pg_isready -U media -d media"
+          --health-interval 2s --health-timeout 2s --health-retries 20
+    env:
+      DATABASE_URL: postgres://media:media_dev_only@127.0.0.1:5438/media
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run db:migrate
+      - run: npm test
+      - run: npm run build

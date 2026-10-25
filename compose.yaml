@@ -1,0 +1,28 @@
+name: griva-media-search
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: media
+      POSTGRES_PASSWORD: media_dev_only
+      POSTGRES_DB: media
+    ports: ["127.0.0.1:5438:5432"]
+    volumes: ["media_pg:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U media -d media"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+  app:
+    profiles: [full]
+    build: .
+    environment:
+      DATABASE_URL: postgres://media:media_dev_only@postgres:5432/media
+      HOST: 0.0.0.0
+      PORT: 4189
+    ports: ["127.0.0.1:4189:4189"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    command: ["sh", "-c", "npm run db:migrate && npm start"]
+volumes:
+  media_pg:
