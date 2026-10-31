@@ -77,4 +77,4 @@ React / TypeScript
    └── private metadata, vectors and file bytes
 ```
 
-Developed for Griva Shah with AI assistance. Password reset, email verification, shared libraries, background transcription and learned model embeddings are outside the current implementation.
+Password reset, email verification, shared libraries, background transcription and learned model embeddings are outside the current implementation.
